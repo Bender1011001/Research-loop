@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 import subprocess
 import pandas as pd
 import autogen
@@ -137,7 +138,7 @@ admin = UserProxyAgent(
     max_consecutive_auto_reply=10,
     code_execution_config={
         "work_dir": "experiments",
-        "use_docker": False
+        "use_docker": True
     }
 )
 
@@ -152,6 +153,12 @@ def custom_speaker_selection(last_speaker, groupchat):
     Critic -> (Reject) -> Architect
     Mathematician -> Admin (End)
     """
+    # Check for questions or clarifications to break rigidity
+    if groupchat.messages:
+        last_msg = groupchat.messages[-1]["content"]
+        if "QUESTION" in last_msg.upper() or "CLARIFY" in last_msg.upper():
+            return "auto"
+
     if last_speaker is admin:
         return architect
     elif last_speaker is architect:
@@ -184,10 +191,10 @@ manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config_thinker)
 # --- LIGHTNING LEARNING LOOP ---
 coach = LightningClient(agent_name="Scalar_Team_Alpha")
 
-def get_reward_from_file(filepath):
+def get_reward_from_file(filepath="experiments/current_run.csv", metric_col="volts"):
     try:
         df = pd.read_csv(filepath)
-        v_out = df['volts'].iloc[-1]
+        v_out = df[metric_col].iloc[-1]
         # Simple Reward Function: Higher Voltage = Better
         if v_out > 1000: return 10.0
         if v_out > 100: return 5.0
@@ -229,7 +236,12 @@ def research_cycle(iteration):
             try:
                 # Attempt to parse JSON
                 # Clean up potential markdown code blocks
-                clean_json = last_math_msg.replace("```json", "").replace("```", "").strip()
+                match = re.search(r"```json\s*(.*?)\s*```", last_math_msg, re.DOTALL)
+                if match:
+                    clean_json = match.group(1)
+                else:
+                    # Fallback or handle error if no JSON block found
+                    clean_json = last_math_msg.replace("```json", "").replace("```", "").strip()
                 plan = json.loads(clean_json)
                 
                 print(f"Plan received: {plan.get('model_name', 'Unnamed')}")
@@ -246,8 +258,24 @@ def research_cycle(iteration):
                 
                 # 4. Execute the Script
                 print("Executing simulation...")
+
+                use_docker = admin.code_execution_config.get("use_docker", False)
+
+                if use_docker:
+                    # Ensure path uses forward slashes for Linux container
+                    docker_script_path = script_path.replace(os.sep, '/')
+                    cmd = [
+                        'docker', 'run', '--rm',
+                        '-v', f'{os.getcwd()}:/app',
+                        '-w', '/app',
+                        'python:3.10-slim',
+                        'python', docker_script_path
+                    ]
+                else:
+                    cmd = ['python', script_path]
+
                 result = subprocess.run(
-                    ['python', script_path],
+                    cmd,
                     capture_output=True,
                     text=True,
                     cwd=os.getcwd() # Ensure running from root so paths work
@@ -258,7 +286,7 @@ def research_cycle(iteration):
                 
                 if result.returncode == 0:
                     # Check for results file
-                    reward = get_reward_from_file("experiments/current_run.csv")
+                    reward = get_reward_from_file("experiments/current_run.csv", "volts")
                     success = True
                 else:
                     print("Simulation failed.")

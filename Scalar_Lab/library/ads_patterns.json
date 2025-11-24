@@ -112,7 +112,7 @@
         ],
         "export_json": [
             "import json",
-            "data = {'magnitude': float(val)}",
+            "data = {{'magnitude': float(val)}}",
             "with open('{filepath}', 'w') as f: json.dump(data, f)"
         ]
     }
