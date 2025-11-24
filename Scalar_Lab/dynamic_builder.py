@@ -51,12 +51,30 @@ class CodeAssembler:
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse library file {filename}: {e}")
 
+    def _find_pattern(self, type_name):
+        """
+        Search for a component type across all top-level library categories.
+        
+        Args:
+            type_name (str): The name of the component type to find.
+            
+        Returns:
+            tuple: (pattern_lines, category_name) or (None, None) if not found.
+        """
+        # Iterate through all top-level keys in the library
+        for category, content in self.library.items():
+            # We only search inside dictionaries (categories like geometry_shapes, components, etc.)
+            if isinstance(content, dict):
+                if type_name in content:
+                    return content[type_name], category
+        return None, None
+
     def assemble_script(self, plan):
         """
         Assemble the Python script based on the provided plan.
         
         Args:
-            plan (dict): The high-level plan dictionary containing 'engine', 'model_name', 
+            plan (dict): The high-level plan dictionary containing 'engine', 'model_name',
                          'structure', and 'setup'.
                          
         Returns:
@@ -76,6 +94,16 @@ class CodeAssembler:
         
         script_lines.append("") # Add spacing
 
+        # 1.5 Init Project (Engine Specific)
+        if 'init_project' in self.library:
+            for line in self.library['init_project']:
+                try:
+                    formatted_line = line.format(**plan)
+                    script_lines.append(formatted_line)
+                except KeyError as e:
+                    raise ValueError(f"Missing parameter for init_project formatting: {e}")
+            script_lines.append("")
+
         # 2. Structure/Geometry
         if 'structure' in plan:
             for item in plan['structure']:
@@ -85,24 +113,72 @@ class CodeAssembler:
                 if not item_type:
                     continue
                     
-                # Look up geometry shape in library
-                if 'geometry_shapes' not in self.library or item_type not in self.library['geometry_shapes']:
-                    raise ValueError(f"Geometry type '{item_type}' not found in library for engine '{self.engine}'")
+                # Use helper to find pattern
+                pattern_lines, category = self._find_pattern(item_type)
                 
-                pattern_lines = self.library['geometry_shapes'][item_type]
+                if not pattern_lines:
+                    raise ValueError(f"Component type '{item_type}' not found in library for engine '{self.engine}'")
                 
                 # Add comment for clarity
-                script_lines.append(f"# Geometry: {item_type} (ID: {params.get('id', 'N/A')})")
+                script_lines.append(f"# {category}: {item_type} (ID: {params.get('id', 'N/A')})")
                 
                 for line in pattern_lines:
                     try:
                         formatted_line = line.format(**params)
                         script_lines.append(formatted_line)
                     except KeyError as e:
-                        raise ValueError(f"Missing parameter for geometry '{item_type}': {e}")
+                        raise ValueError(f"Missing parameter for component '{item_type}': {e}")
                 script_lines.append("")
 
-        # 3. Physics/Setup
+        # 3. Materials
+        if 'materials' in plan:
+            for item in plan['materials']:
+                item_type = item.get('type')
+                params = item.get('params', {})
+                
+                if not item_type:
+                    continue
+                    
+                pattern_lines, category = self._find_pattern(item_type)
+                
+                if not pattern_lines:
+                    raise ValueError(f"Material type '{item_type}' not found in library for engine '{self.engine}'")
+                
+                script_lines.append(f"# {category}: {item_type}")
+                
+                for line in pattern_lines:
+                    try:
+                        formatted_line = line.format(**params)
+                        script_lines.append(formatted_line)
+                    except KeyError as e:
+                        raise ValueError(f"Missing parameter for material '{item_type}': {e}")
+                script_lines.append("")
+
+        # 4. Physics
+        if 'physics' in plan:
+            for item in plan['physics']:
+                item_type = item.get('type')
+                params = item.get('params', {})
+                
+                if not item_type:
+                    continue
+                    
+                pattern_lines, category = self._find_pattern(item_type)
+                
+                if not pattern_lines:
+                    raise ValueError(f"Physics type '{item_type}' not found in library for engine '{self.engine}'")
+                
+                script_lines.append(f"# {category}: {item_type}")
+                
+                for line in pattern_lines:
+                    try:
+                        formatted_line = line.format(**params)
+                        script_lines.append(formatted_line)
+                    except KeyError as e:
+                        raise ValueError(f"Missing parameter for physics '{item_type}': {e}")
+                script_lines.append("")
+
+        # 5. Setup/Studies
         if 'setup' in plan:
             setup_items = plan['setup']
             # Handle both single dict and list of dicts for setup
@@ -116,22 +192,11 @@ class CodeAssembler:
                 if not item_type:
                     continue
 
-                # Look up in physics_modules or studies
-                pattern_lines = None
-                category = None
+                # Use helper to find pattern
+                pattern_lines, category = self._find_pattern(item_type)
                 
-                if 'physics_modules' in self.library and item_type in self.library['physics_modules']:
-                    pattern_lines = self.library['physics_modules'][item_type]
-                    category = "Physics"
-                elif 'studies' in self.library and item_type in self.library['studies']:
-                    pattern_lines = self.library['studies'][item_type]
-                    category = "Study"
-                elif 'setup' in self.library and item_type in self.library['setup']:
-                    pattern_lines = self.library['setup'][item_type]
-                    category = "Setup"
-                
-                if pattern_lines is None:
-                     raise ValueError(f"Setup type '{item_type}' not found in physics_modules, studies, or setup for engine '{self.engine}'")
+                if not pattern_lines:
+                     raise ValueError(f"Setup type '{item_type}' not found in library for engine '{self.engine}'")
                 
                 script_lines.append(f"# {category}: {item_type}")
                 
@@ -141,6 +206,70 @@ class CodeAssembler:
                         script_lines.append(formatted_line)
                     except KeyError as e:
                         raise ValueError(f"Missing parameter for setup '{item_type}': {e}")
+                script_lines.append("")
+
+        # 5.5 Analyze (Engine Specific)
+        if 'analyze' in self.library:
+            # Analyze might be a simple list of commands or a dict of types
+            # For Ansys it is a dict with "run"
+            # We can check if plan has an 'analyze' section or just run default
+            
+            # If the library has 'analyze' as a dict, we look for 'analyze' in plan
+            if isinstance(self.library['analyze'], dict):
+                 if 'analyze' in plan:
+                    for item in plan['analyze']:
+                        item_type = item.get('type')
+                        params = item.get('params', {})
+                        
+                        if not item_type:
+                            continue
+                            
+                        pattern_lines, category = self._find_pattern(item_type)
+                        
+                        if not pattern_lines:
+                             raise ValueError(f"Analyze type '{item_type}' not found in library for engine '{self.engine}'")
+                        
+                        script_lines.append(f"# {category}: {item_type}")
+                        for line in pattern_lines:
+                            try:
+                                formatted_line = line.format(**params)
+                                script_lines.append(formatted_line)
+                            except KeyError as e:
+                                raise ValueError(f"Missing parameter for analyze '{item_type}': {e}")
+                        script_lines.append("")
+            
+            # If it's a list (direct commands), just append them
+            elif isinstance(self.library['analyze'], list):
+                 for line in self.library['analyze']:
+                    try:
+                        formatted_line = line.format(**plan)
+                        script_lines.append(formatted_line)
+                    except KeyError as e:
+                        raise ValueError(f"Missing parameter for analyze formatting: {e}")
+                 script_lines.append("")
+
+        # 6. Results
+        if 'results' in plan:
+            for item in plan['results']:
+                item_type = item.get('type')
+                params = item.get('params', {})
+                
+                if not item_type:
+                    continue
+                    
+                pattern_lines, category = self._find_pattern(item_type)
+                
+                if not pattern_lines:
+                    raise ValueError(f"Result type '{item_type}' not found in library for engine '{self.engine}'")
+                
+                script_lines.append(f"# {category}: {item_type}")
+                
+                for line in pattern_lines:
+                    try:
+                        formatted_line = line.format(**params)
+                        script_lines.append(formatted_line)
+                    except KeyError as e:
+                        raise ValueError(f"Missing parameter for result '{item_type}': {e}")
                 script_lines.append("")
 
         return "\n".join(script_lines)

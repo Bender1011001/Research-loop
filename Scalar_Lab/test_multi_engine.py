@@ -25,7 +25,10 @@ class TestMultiEngine(unittest.TestCase):
           "setup": {
             "type": "transient",
             "params": { "stop_time": "10ms", "time_step": "0.1ms" }
-          }
+          },
+          "analyze": [
+            { "type": "run" }
+          ]
         }
         
         print(f"Testing with mock input: {json.dumps(mock_json_input, indent=2)}")
@@ -44,12 +47,10 @@ class TestMultiEngine(unittest.TestCase):
 
         # Assertions
         self.assertIn("from pyaedt import Maxwell3d", script_content, "Script should contain PyAEDT imports")
+        self.assertIn("m3d = Maxwell3d", script_content, "Script should contain Maxwell3d instantiation")
         self.assertIn("m3d.modeler.create_box", script_content, "Script should contain box creation command")
-        
-        # Check for setup commands
-        # Note: This might fail if CodeAssembler doesn't support 'setup' key in library correctly yet
-        # But we assert what we expect.
-        # self.assertIn("m3d.create_setup", script_content, "Script should contain setup creation command")
+        self.assertIn("m3d.create_setup", script_content, "Script should contain setup creation command")
+        self.assertIn("m3d.analyze_setup", script_content, "Script should contain analyze command")
 
         print("\nGenerated Script Content Preview:")
         print("-" * 40)

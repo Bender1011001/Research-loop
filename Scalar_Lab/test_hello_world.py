@@ -22,10 +22,19 @@ class TestHelloWorld(unittest.TestCase):
           "structure": [
             { "type": "cylinder", "params": { "radius": "10[mm]", "height": "50[mm]", "px": "0", "py": "0", "pz": "0", "ax": "0", "ay": "0", "az": "1", "id": "1" } }
           ],
+          "materials": [
+            { "type": "air", "params": {} }
+          ],
+          "physics": [
+            { "type": "magnetic_fields_mf", "params": {} }
+          ],
           "setup": {
             "type": "frequency_domain",
             "params": { "freq_range": "60[Hz]" }
-          }
+          },
+          "results": [
+            { "type": "export_csv", "params": { "expressions_list": "['mf.normB']", "filepath": "results.csv", "id": "1" } }
+          ]
         }
         
         print(f"Testing with mock input: {json.dumps(mock_json_input, indent=2)}")
@@ -47,6 +56,9 @@ class TestHelloWorld(unittest.TestCase):
         self.assertIn("frequency_domain", script_content, "Script should contain frequency domain setup")
         self.assertIn("AirCoreInductor", script_content, "Script should contain the model name")
         self.assertIn("10[mm]", script_content, "Script should contain the radius parameter")
+        self.assertIn("mat_air", script_content, "Script should contain air material")
+        self.assertIn("MagneticFields", script_content, "Script should contain MagneticFields physics")
+        self.assertIn("export_csv", script_content, "Script should contain export_csv result")
         
         print("\nGenerated Script Content Preview:")
         print("-" * 40)

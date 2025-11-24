@@ -103,17 +103,17 @@
     "materials": {
         "air": [
             "mat = model.materials.create('mat_air')",
-            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '0'})",
+            "mat.property('def', {{'epsilonr': '1', 'mur': '1', 'sigma': '0'}})",
             "mat.selection().all()"
         ],
         "copper": [
             "mat = model.materials.create('mat_cu')",
-            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '5.998e7[S/m]'})",
+            "mat.property('def', {{'epsilonr': '1', 'mur': '1', 'sigma': '5.998e7[S/m]'}})",
             "mat.selection().set({domain_ids})"
         ],
         "custom_core": [
             "mat = model.materials.create('mat_custom')",
-            "mat.property('def', {'epsilonr': '{epsilon}', 'mur': '{mu}', 'sigma': '{sigma}'})",
+            "mat.property('def', {{'epsilonr': '{epsilon}', 'mur': '{mu}', 'sigma': '{sigma}'}})",
             "mat.selection().set({domain_ids})"
         ]
     },
