@@ -1,0 +1,324 @@
+{
+    "imports": [
+        "import mph",
+        "client = mph.start()",
+        "model = client.create('{model_name}')"
+    ],
+    "geometry_shapes": {
+        "block": [
+            "geom = model.geometries.create('geom1')",
+            "blk = geom.create('blk1', 'Block')",
+            "blk.property('size', ['{size_x}', '{size_y}', '{size_z}'])",
+            "blk.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "cylinder": [
+            "geom = model.geometries.create('geom1')",
+            "cyl = geom.create('cyl1', 'Cylinder')",
+            "cyl.property('r', '{radius}')",
+            "cyl.property('h', '{height}')",
+            "cyl.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "sphere": [
+            "geom = model.geometries.create('geom1')",
+            "sph = geom.create('sph1', 'Sphere')",
+            "sph.property('r', '{radius}')",
+            "sph.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "cone": [
+            "geom = model.geometries.create('geom1')",
+            "con = geom.create('con1', 'Cone')",
+            "con.property('r', '{radius}')",
+            "con.property('r2', '{radius2}')",
+            "con.property('h', '{height}')",
+            "con.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "toroid": [
+            "geom = model.geometries.create('geom1')",
+            "tor = geom.create('tor1', 'Torus')",
+            "tor.property('rmaj', '{major_radius}')",
+            "tor.property('rmin', '{minor_radius}')",
+            "tor.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "helix": [
+            "geom = model.geometries.create('geom1')",
+            "pc = geom.create('pc1', 'ParametricCurve')",
+            "pc.property('parmax', '2*pi*{turns}')",
+            "pc.property('coord', ['cos(s)*{radius}', 'sin(s)*{radius}', '{pitch}*s/(2*pi)'])",
+            "model.build(geom)"
+        ],
+        "parametric_curve": [
+            "geom = model.geometries.create('geom1')",
+            "pc = geom.create('pc1', 'ParametricCurve')",
+            "pc.property('parmax', '{param_max}')",
+            "pc.property('coord', ['{x_expr}', '{y_expr}', '{z_expr}'])",
+            "model.build(geom)"
+        ],
+        "union": [
+            "uni = geom.create('uni1', 'Union')",
+            "uni.selection('input').set(['{obj1}', '{obj2}'])",
+            "model.build(geom)"
+        ],
+        "difference": [
+            "dif = geom.create('dif1', 'Difference')",
+            "dif.selection('input').set(['{keep_obj}'])",
+            "dif.selection('input2').set(['{subtract_obj}'])",
+            "model.build(geom)"
+        ],
+        "intersection": [
+            "intr = geom.create('int1', 'Intersection')",
+            "intr.selection('input').set(['{obj1}', '{obj2}'])",
+            "model.build(geom)"
+        ]
+    },
+    "physics_modules": {
+        "mf": [
+            "mf = model.physics.create('mf', 'MagneticFields', 'geom1')",
+            "amp = mf.feature.create('al1', 'AmpereLaw', 'domain')",
+            "amp.selection().all()",
+            "coil = mf.feature.create('coil1', 'Coil', 'domain')",
+            "coil.property('Icoil', '{current}')",
+            "coil.property('N', '{turns}')",
+            "coil.selection().set([{coil_domain}])",
+            "mi = mf.feature.create('mi1', 'MagneticInsulation', 'boundary')",
+            "mi.selection().all()"
+        ],
+        "es": [
+            "es = model.physics.create('es', 'Electrostatics', 'geom1')",
+            "grnd = es.feature.create('gnd1', 'Ground', 'boundary')",
+            "grnd.selection().set([{ground_bnds}])",
+            "term = es.feature.create('term1', 'Terminal', 'boundary')",
+            "term.property('TerminalType', 'Voltage')",
+            "term.property('V0', '{voltage}')",
+            "term.selection().set([{terminal_bnds}])",
+            "pot = es.feature.create('pot1', 'ElectricPotential', 'boundary')",
+            "pot.property('V0', '{potential}')",
+            "pot.selection().set([{potential_bnds}])"
+        ],
+        "cir": [
+            "cir = model.physics.create('cir', 'ElectricalCircuit')",
+            "spice = cir.feature.create('sp1', 'SpiceImport')",
+            "spice.property('filename', '{netlist_file}')",
+            "spice.importData()"
+        ],
+        "g": [
+            "g = model.physics.create('g', 'GeneralFormPDE', 'geom1', ['phi'])"
+        ]
+    },
+    "materials": {
+        "metglas": [
+            "mat = model.materials.create('mat1')",
+            "mat.property('family', 'custom')",
+            "mat.property('name', 'Metglas')",
+            "mat.property('epsilonr', '{epsilon_r}')",
+            "mat.property('mur', '{mu_r}')"
+        ]
+    },
+    "meshing": {
+        "free_tetrahedral": [
+            "mesh = model.meshes.create('mesh1', 'geom1')",
+            "mesh.create('size1', 'Size')",
+            "mesh.feature('size1').property('hauto', '{mesh_size}')",
+            "mesh.create('ft1', 'FreeTet')",
+            "model.build(mesh)"
+        ],
+        "swept": [
+            "mesh = model.meshes.create('mesh1', 'geom1')",
+            "swp = mesh.create('swept1', 'Swept')",
+            "swp.selection('domain').set([{domains}])",
+            "swp.selection('sourceface').set([{source_face}])",
+            "swp.selection('targetface').set([{target_face}])",
+            "model.build(mesh)"
+        ]
+    },
+    "studies": {
+        "stationary": [
+            "study = model.studies.create('std1')",
+            "study.feature.create('stat', 'Stationary')"
+        ],
+        "frequency_domain": [
+            "study = model.studies.create('std1')",
+            "study.feature.create('freq', 'Frequency')",
+            "study.feature('freq').property('plist', '{freq_list}')"
+        ],
+        "time_dependent": [
+            "study = model.studies.create('std1')",
+            "study.feature.create('time', 'Time')",
+            "study.feature('time').property('tlist', '{time_list}')"
+        ]
+    },
+    "results_extraction": {
+        "global_evaluation": [
+            "glob = model.results.numerical.create('gev1', 'EvalGlobal')",
+            "glob.property('expr', ['{expr1}', '{expr2}', '{expr3}'])",
+            "glob.property('descr', ['{descr1}', '{descr2}', '{descr3}'])",
+            "glob.property('unit', ['{unit1}', '{unit2}', '{unit3}'])"
+        ],
+        "export_csv": [
+            "export = model.results.export.create('data1', 'Data')",
+            "export.property('expr', ['{expr1}', '{expr2}', '{expr3}'])",
+            "export.property('struct', 'spreadsheet')",
+            "export.property('filename', '{file_name}')",
+            "export.run()"
+        ]
+    }
+}
+
+
+    "description": "Master COMSOL Pattern Library for Scalar Electrodynamics",
+    "version": "3.0",
+    "imports": [
+        "import mph",
+        "import numpy as np",
+        "client = mph.start()",
+        "model = client.create('{model_name}')"
+    ],
+    "geometry_shapes": {
+        "block": [
+            "geom = model.geometries.create('geom1')",
+            "blk = geom.create('blk{id}', 'Block')",
+            "blk.property('size', ['{size_x}', '{size_y}', '{size_z}'])",
+            "blk.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "cylinder": [
+            "geom = model.geometries.create('geom1')",
+            "cyl = geom.create('cyl{id}', 'Cylinder')",
+            "cyl.property('r', '{radius}')",
+            "cyl.property('h', '{height}')",
+            "cyl.property('pos', ['{px}', '{py}', '{pz}'])",
+            "cyl.property('axis', ['{ax}', '{ay}', '{az}'])",
+            "model.build(geom)"
+        ],
+        "sphere": [
+            "geom = model.geometries.create('geom1')",
+            "sph = geom.create('sph{id}', 'Sphere')",
+            "sph.property('r', '{radius}')",
+            "sph.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "toroid": [
+            "geom = model.geometries.create('geom1')",
+            "tor = geom.create('tor{id}', 'Torus')",
+            "tor.property('rmaj', '{major_radius}')",
+            "tor.property('rmin', '{minor_radius}')",
+            "tor.property('pos', ['{px}', '{py}', '{pz}'])",
+            "tor.property('axis', ['{ax}', '{ay}', '{az}'])",
+            "model.build(geom)"
+        ],
+        "helix_coil": [
+            "geom = model.geometries.create('geom1')",
+            "hel = geom.create('hel{id}', 'Helix')",
+            "hel.property('r', '{radius}')",
+            "hel.property('h', '{height}')",
+            "hel.property('n', '{turns}')",
+            "hel.property('rwire', '{wire_radius}')",
+            "model.build(geom)"
+        ],
+        "boolean_union": [
+            "uni = geom.create('uni{id}', 'Union')",
+            "uni.selection('input').set({objects_list})",
+            "model.build(geom)"
+        ],
+        "boolean_difference": [
+            "dif = geom.create('dif{id}', 'Difference')",
+            "dif.selection('input').set({keep_list})",
+            "dif.selection('input2').set({subtract_list})",
+            "model.build(geom)"
+        ]
+    },
+    "physics_modules": {
+        "magnetic_fields_mf": [
+            "phys = model.physics.create('mf', 'MagneticFields', 'geom1')",
+            "amp = phys.feature.create('al1', 'AmpereLaw', 'domain')",
+            "amp.selection().all()",
+            "ins = phys.feature.create('ins1', 'MagneticInsulation', 'boundary')",
+            "ins.selection().all()"
+        ],
+        "electric_currents_ec": [
+            "phys = model.physics.create('ec', 'ElectricCurrents', 'geom1')",
+            "cuc = phys.feature.create('cuc1', 'CurrentConservation', 'domain')",
+            "cuc.selection().all()",
+            "gnd = phys.feature.create('gnd1', 'Ground', 'boundary')"
+        ],
+        "scalar_wave_pde": [
+            "# Bearden's Scalar Field Formulation (General Form PDE)",
+            "phys = model.physics.create('g', 'GeneralFormPDE', 'geom1', ['phi'])",
+            "gde = phys.feature.create('gde1', 'GeneralFormPDE', 'domain')",
+            "gde.property('source', '{source_term}')",
+            "gde.property('da', '{damping_term}')",
+            "gde.selection().all()"
+        ]
+    },
+    "components": {
+        "multi_turn_coil": [
+            "coil = phys.create('coil{id}', 'Coil', 2)",
+            "coil.property('ConductorModel', 'HomogenizedMultiTurn')",
+            "coil.property('N', '{turns}')",
+            "coil.property('ICoil', '{current}')",
+            "coil.property('CoilType', 'Circular')",
+            "coil.selection().set({domain_ids})"
+        ],
+        "voltage_terminal": [
+            "term = phys.create('term{id}', 'Terminal', 2)",
+            "term.property('TerminalType', 'Voltage')",
+            "term.property('V0', '{voltage}')",
+            "term.selection().set({boundary_ids})"
+        ]
+    },
+    "materials": {
+        "air": [
+            "mat = model.materials.create('mat_air')",
+            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '0'})",
+            "mat.selection().all()"
+        ],
+        "copper": [
+            "mat = model.materials.create('mat_cu')",
+            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '5.998e7[S/m]'})",
+            "mat.selection().set({domain_ids})"
+        ],
+        "custom_core": [
+            "mat = model.materials.create('mat_custom')",
+            "mat.property('def', {'epsilonr': '{epsilon}', 'mur': '{mu}', 'sigma': '{sigma}'})",
+            "mat.selection().set({domain_ids})"
+        ]
+    },
+    "studies": {
+        "stationary": [
+            "std = model.studies.create('std1')",
+            "std.feature.create('stat', 'Stationary')",
+            "model.solve('std1')"
+        ],
+        "frequency_domain": [
+            "std = model.studies.create('std1')",
+            "freq = std.feature.create('freq', 'Frequency')",
+            "freq.property('plist', '{freq_range}')",
+            "model.solve('std1')"
+        ],
+        "time_dependent": [
+            "std = model.studies.create('std1')",
+            "time = std.feature.create('time', 'Time')",
+            "time.property('tlist', 'range(0,{step},{end})')",
+            "model.solve('std1')"
+        ]
+    },
+    "results_extraction": {
+        "global_eval": [
+            "eval = model.results.numerical.create('gev{id}', 'EvalGlobal')",
+            "eval.property('expr', {expressions_list})",
+            "eval.property('unit', {units_list})",
+            "res = eval.compute()",
+            "print(f'GLOBAL_RESULT: {res}')"
+        ],
+        "export_csv": [
+            "exp = model.results.export.create('data{id}', 'Data')",
+            "exp.property('expr', {expressions_list})",
+            "exp.property('filename', '{filepath}')",
+            "exp.run()"
+        ]
+    }
+}

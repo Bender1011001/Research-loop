@@ -1,10 +1,12 @@
 import os
 import time
 import json
+import subprocess
 import pandas as pd
 import autogen
 from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from agentlightning import LightningClient, LightningTask
+from dynamic_builder import CodeAssembler
 
 # --- CONFIGURATION ---
 # Pointing to your local Qwen model
@@ -70,18 +72,23 @@ mathematician = AssistantAgent(
     name="Mathematician",
     llm_config=code_config, # Uses lower temp config
     system_message="""
-    You are a COMSOL Automation Expert using the 'mph' Python library.
-    Your Role: Listen to the Architect, Alchemist, and Switchman, then WRITE THE CODE.
-    
-    CRITICAL INSTRUCTIONS:
-    1. Import 'mph'.
-    2. Connect to the server using: client = mph.start(cores=4)
-    3. Create/Load a model.
-    4. Apply the material props (Alchemist) and waveform (Switchman).
-    5. SOLVE the study.
-    6. Evaluate 'volts' and 'input_power'.
-    7. Save results to 'current_run.csv'.
-    8. Wrap code in ```python``` blocks.
+    You are a Simulation Architect. You do NOT write Python code directly. You translate the research team's theory into a JSON Configuration Plan for the Lab Builder.
+
+    Your Output MUST be a single valid JSON block following this schema:
+
+    {
+      "engine": "comsol", // or "ansys", "ads"
+      "model_name": "Experiment_Name",
+      "structure": [
+        { "type": "toroid", "params": { "major_radius": "50[mm]", ... } },
+        { "type": "coil", "params": { "turns": "100", ... } }
+      ],
+      "setup": {
+        "type": "frequency_domain",
+        "params": { "freq_list": "range(10, 1000, 10)" }
+      }
+    }
+    Constraint: You must only use 'type' keys that exist in the loaded Pattern Library.
     """
 )
 
@@ -146,15 +153,73 @@ def research_cycle(iteration):
         message=initial_message
     )
     
-    # 2. The Mathematician should have written code, and Admin should have run it.
-    # We check the artifact.
-    reward = get_reward_from_file("experiments/current_run.csv")
+    # 2. Extract JSON Plan from Mathematician's last message
+    # We iterate through chat history to find the last message from Mathematician
+    last_math_msg = None
+    for msg in reversed(chat_result.chat_history):
+        if msg.get("name") == "Mathematician":
+            last_math_msg = msg.get("content")
+            break
+            
+    reward = 0.0
+    execution_output = ""
+    
+    if last_math_msg:
+        try:
+            # Attempt to parse JSON
+            # Clean up potential markdown code blocks
+            clean_json = last_math_msg.replace("```json", "").replace("```", "").strip()
+            plan = json.loads(clean_json)
+            
+            print(f"Plan received: {plan.get('model_name', 'Unnamed')}")
+            
+            # 3. Build the Script
+            assembler = CodeAssembler(engine=plan.get('engine', 'comsol'))
+            script_content = assembler.assemble_script(plan)
+            
+            script_path = os.path.join("experiments", "current_run.py")
+            with open(script_path, "w") as f:
+                f.write(script_content)
+                
+            print(f"Script generated at: {script_path}")
+            
+            # 4. Execute the Script
+            print("Executing simulation...")
+            result = subprocess.run(
+                ['python', script_path],
+                capture_output=True,
+                text=True,
+                cwd=os.getcwd() # Ensure running from root so paths work
+            )
+            
+            execution_output = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            print(execution_output)
+            
+            if result.returncode == 0:
+                # Check for results file
+                reward = get_reward_from_file("experiments/current_run.csv")
+            else:
+                print("Simulation failed.")
+                reward = -1.0
+                
+        except json.JSONDecodeError:
+            print("Failed to parse JSON plan from Mathematician.")
+            execution_output = "JSON Parse Error"
+            reward = -0.5
+        except Exception as e:
+            print(f"Error during build/execution: {e}")
+            execution_output = str(e)
+            reward = -1.0
+    else:
+        print("No plan received from Mathematician.")
+        reward = 0.0
+
     print(f"--- CYCLE {iteration} END. REWARD: {reward} ---")
     
-    # 3. Log to Lightning (Reinforcement Learning)
+    # 5. Log to Lightning (Reinforcement Learning)
     coach.log_trajectory(
         prompt=initial_message,
-        response=str(chat_result.chat_history),
+        response=str(chat_result.chat_history) + f"\n\nEXECUTION OUTPUT:\n{execution_output}",
         reward=reward
     )
 

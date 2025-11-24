@@ -1,0 +1,119 @@
+{
+    "description": "Master Keysight ADS Pattern Library",
+    "version": "2.1",
+    "imports": [
+        "import ads.core",
+        "import ads.lib",
+        "import os",
+        "# Open Workspace",
+        "ws_path = os.path.join(os.getcwd(), '{workspace_name}_wrk')",
+        "if ads.core.Workspace.find(ws_path):",
+        "    workspace = ads.core.Workspace.open(ws_path)",
+        "else:",
+        "    workspace = ads.core.Workspace.create(ws_path)"
+    ],
+    "init_design": [
+        "lib = workspace.create_library('{lib_name}')",
+        "cell = lib.create_cell('{cell_name}')",
+        "view = cell.create_view('schematic', 'schematic')",
+        "sch = view"
+    ],
+    "components": {
+        "lumped": {
+            "inductor": [
+                "cmp = sch.place_component('AnalogLib', 'L', {x}, {y})",
+                "cmp.set_parameter('L', '{inductance}')",
+                "cmp.set_name('{name}')"
+            ],
+            "capacitor": [
+                "cmp = sch.place_component('AnalogLib', 'C', {x}, {y})",
+                "cmp.set_parameter('C', '{capacitance}')",
+                "cmp.set_name('{name}')"
+            ],
+            "resistor": [
+                "cmp = sch.place_component('AnalogLib', 'R', {x}, {y})",
+                "cmp.set_parameter('R', '{resistance}')",
+                "cmp.set_name('{name}')"
+            ],
+            "ground": [
+                "sch.place_component('AnalogLib', 'Ground', {x}, {y})"
+            ]
+        },
+        "active": {
+            "mosfet": [
+                "cmp = sch.place_component('Devices_MOS', 'MOSFET_NMOS', {x}, {y})",
+                "cmp.set_parameter('Model', '{model_name}')"
+            ],
+            "diode_varactor": [
+                "cmp = sch.place_component('Devices_DIODE', 'Diode', {x}, {y})",
+                "cmp.set_parameter('Model', '{model_name}')"
+            ]
+        },
+        "sources": {
+            "v_sine": [
+                "src = sch.place_component('Sources_Freq', 'V_1Tone', {x}, {y})",
+                "src.set_parameter('V', '{voltage}')",
+                "src.set_parameter('Freq', '{frequency}')"
+            ],
+            "v_pulse": [
+                "src = sch.place_component('Sources_Time', 'VtPulse', {x}, {y})",
+                "src.set_parameter('Vlow', '0 V')",
+                "src.set_parameter('Vhigh', '{voltage}')",
+                "src.set_parameter('Width', '{width}')",
+                "src.set_parameter('Period', '{period}')"
+            ]
+        },
+        "probes": {
+            "v_probe": [
+                "prb = sch.place_component('Probe_Components', 'V_Probe', {x}, {y})",
+                "prb.set_name('{name}')"
+            ],
+            "i_probe": [
+                "prb = sch.place_component('Probe_Components', 'I_Probe', {x}, {y})",
+                "prb.set_name('{name}')"
+            ]
+        }
+    },
+    "wiring": {
+        "connect": [
+            "sch.create_wire([{x1}, {y1}], [{x2}, {y2}])"
+        ]
+    },
+    "simulation_controllers": {
+        "harmonic_balance": [
+            "hb = sch.place_component('Simulation_HB', 'HarmonicBalance', {x}, {y})",
+            "hb.set_parameter('Freq[1]', '{frequency}')",
+            "hb.set_parameter('Order[1]', '{order}')",
+            "hb.set_parameter('MaxIter', '100')",
+            "hb.set_parameter('UseKrylov', 'yes')"
+        ],
+        "transient": [
+            "tran = sch.place_component('Simulation_Transient', 'Transient', {x}, {y})",
+            "tran.set_parameter('StopTime', '{stop_time}')",
+            "tran.set_parameter('MaxTimeStep', '{step_size}')"
+        ],
+        "sp_params": [
+            "sp = sch.place_component('Simulation_S_Param', 'S_Param', {x}, {y})",
+            "sp.set_parameter('Start', '{start_freq}')",
+            "sp.set_parameter('Stop', '{stop_freq}')",
+            "sp.set_parameter('Step', '{step_freq}')"
+        ]
+    },
+    "execution": [
+        "job = ads.core.SimulationJob(view)",
+        "result = job.run()",
+        "print('Simulation Complete')"
+    ],
+    "data_display": {
+        "extract_magnitude": [
+            "ds = result.load_dataset()",
+            "val = ds['{probe_name}'].mag[1]",
+            "print(f'RESULT_MAG: {val}')"
+        ],
+        "export_json": [
+            "import json",
+            "data = {'magnitude': float(val)}",
+            "with open('{filepath}', 'w') as f: json.dump(data, f)"
+        ]
+    }
+}

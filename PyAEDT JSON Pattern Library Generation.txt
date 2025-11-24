@@ -1,0 +1,357 @@
+Architectural Specification: PyAEDT Automation Layer for Non-Linear Magnetic Systems
+1. Introduction: The Paradigm of Automated Electromagnetic Simulation
+The landscape of computational electromagnetics (CEM) is undergoing a fundamental paradigm shift. Traditionally, Finite Element Analysis (FEA) has been the domain of the human expert, requiring manual interaction with Graphical User Interfaces (GUIs) to define complex geometries, assign material properties, and interpret field plots. However, the emergence of Artificial Intelligence (AI) and autonomous agents necessitates a different approach: the programmatic generation of simulation environments. This report defines the architectural specifications for a "Translation Layer" designed to bridge the gap between high-level AI reasoning and the low-level execution logic of Ansys Electronics Desktop (AEDT), specifically mediated through the PyAEDT Python library.
+The specific research domain—Non-Linear Magnetics, Saturation, and Pulse Dynamics—presents unique challenges that standard linear automation scripts fail to address. Devices such as the Motionless Electromagnetic Generator (MEG) or Bedini-style inductive pulse motors operate fundamentally on the non-linear capabilities of ferromagnetic materials. They exploit the "knee" of the B-H saturation curve, rapid magnetic switching times, and the transient harvesting of Back Electromotive Force (EMF). To simulate these phenomena effectively, the automation layer must support high-fidelity control over non-linear material definitions, precise time-stepping for microsecond-scale pulses, and complex boundary conditions that mimic physical lamination stacks.
+This document serves as an exhaustive reference for the construction of ansys_patterns.json, a pattern library that encapsulates executable PyAEDT code blocks. By externalizing the PyAEDT syntax into a JSON structure, we decouple the "knowledge" of the simulation tool from the "reasoning" of the AI agent. The agent selects a key (e.g., "CreateSoftIronBH"), injects specific physical parameters (e.g., coercivity or permeability points), and the system executes the corresponding Ansys API calls without the agent needing to understand the underlying Component Object Model (COM) interface or the specific object hierarchy of the Maxwell3d class.
+1.1 The Role of PyAEDT in Modern Simulation Workflow
+PyAEDT functions as a Python wrapper around the Ansys Electronics Desktop API, which was historically accessed via VBScript or IronPython. This wrapper modernizes the interface, allowing for integration with the broader scientific Python ecosystem (NumPy, pandas, SciPy). For our specific application, PyAEDT's ability to handle "Headless" (non-graphical) sessions is paramount.
+Running simulations in headless mode drastically reduces computational overhead by eliminating the rendering pipeline. In the context of an AI agent performing iterative optimization—perhaps exploring thousands of variations of a stator gap width to maximize flux linkage switching—the headless mode ensures that system resources are dedicated solely to the matrix solve operations. Furthermore, PyAEDT manages the robust connection to the AEDT Desktop, handling session IDs, license checkout/checkin, and error propagation, which are critical for long-running autonomous batch jobs.
+The architectural goal is to transform the Ansys Maxwell environment into a "Function as a Service" (FaaS) for the AI agent. The agent provides the input vector (geometry, material properties, excitation), and the system returns the performance scalar (efficiency, torque, induced voltage) via a structured CSV output.
+1.2 Theoretical Scope: Pulse Dynamics and Non-Linearity
+The simulation targets are characterized by rapid transient events. In a standard motor simulation, the assumption of sinusoidal steady-state operation often allows for simplified Eddy Current solvers or Magnetostatic snapshots. However, pulse motors and saturation-based generators rely on the rate of change of the magnetic field (dB/dt).
+According to Faraday's Law of Induction, the induced voltage is proportional to the time derivative of the magnetic flux. In devices designed to harvest inductive spikes, the "shut-off" time of the coil is critical. If the core material is saturated, the effective permeability drops to \mu_0, changing the inductance L of the coil dynamically. Capturing this behavior requires a Transient Solver coupled with a robust non-linear material model (B-H curve). The automation layer must therefore provide granular control over the definition of these curves, ensuring that the solver can accurately interpolate magnetic permeability across the entire operating range, from the linear region through the knee and into deep saturation.
+This report will dissect the necessary PyAEDT commands to achieve this, structured into logical domains: Project Initialization, Geometry, Materials, Windings, Boundaries, Setup, and Results.
+2. System Initialization and Session Management
+The stability of an automated simulation pipeline rests on its initialization routine. Improper handling of the AEDT application instance can lead to "zombie" processes consuming memory, license server lockouts, or cross-talk between concurrent simulations.
+2.1 The Desktop Class and COM Interface
+The entry point for any PyAEDT automation is the Desktop class. This class wraps the local COM object that communicates with the installed Ansys binaries. Our research identifies distinct initialization patterns depending on the desired isolation level.
+The most robust pattern for autonomous agents involves the explicit instantiation of the Maxwell3d object with specific arguments for versioning and graphical rendering. As noted in snippet and , the non_graphical Boolean flag is the primary control for headless operation. When set to True, the Ansys UI is suppressed. This is mandatory for deployment on cloud servers or high-performance computing (HPC) clusters where no display server (X11) exists.
+Crucially, the close_on_exit parameter determines the lifecycle of the application. For an AI agent executing a single design task, close_on_exit=True ensures that the AEDT process terminates upon script completion, releasing the valuable simulation license back to the pool. If this were set to False in a loop, the server would eventually run out of available licenses or RAM.
+2.2 Version Control and Project Naming
+The version parameter (e.g., "2024.2", "2025.1") must be explicitly handled. PyAEDT attempts to detect the latest version, but in a production environment with multiple Ansys versions installed (e.g., for legacy compatibility), explicit definition prevents version mismatch errors.
+The project_name and design_name parameters allow the agent to manage its workspace. By dynamically assigning project names (e.g., Simulation_Run_001.aedt), the agent maintains a traceable history of its design iterations. The new_desktop_session argument is also vital; setting this to True forces a fresh instance of AEDT, preventing variable contamination from previous runs.
+2.3 Implementation Strategy: The init_project Pattern
+The JSON pattern for initialization must encapsulate these best practices. It imports the necessary classes (Maxwell3d, Hfss, Desktop) and initializes the application object.
+Table 1: Initialization Parameters and Implications
+Parameter
+Type
+Default
+Description & Implication for AI Automation
+specified_version
+String
+Latest
+Enforces stability by pinning the Ansys version (e.g., "2025.2").
+non_graphical
+Boolean
+False
+Critical. Set to True to enable headless batch processing and save GPU resources.
+new_desktop_session
+Boolean
+True
+Ensures process isolation. Prevents "state leakage" between separate simulation jobs.
+close_on_exit
+Boolean
+True
+Resource management. Forces license release and process termination.
+project
+String
+None
+Defines the filename. Allows the AI to organize datasets logically.
+The resulting code block for the JSON library is constructed to accept format strings for these key variables, allowing the AI agent to determine the context at runtime.
+3. Computational Geometry and Topology
+The "body" of the simulation is its geometry. For non-linear magnetic devices, the geometry is not merely a container for materials but a functional component of the magnetic circuit. The reluctance of the circuit is directly proportional to the path length and inversely proportional to the cross-sectional area. Therefore, precise parametric control over dimensions is non-negotiable.
+3.1 Parametric Primitives: Box, Cylinder, and Torus
+The PyAEDT modeler (m3d.modeler) utilizes a constructive solid geometry (CSG) approach. Objects are created as primitives and then modified via Boolean operations.
+? Box: The fundamental building block for cores, magnets, and flux paths. The create_box method requires an origin [x, y, z] and dimensions [length, width, height]. For a magnetic core, the orientation of these dimensions relative to the flux direction is critical if anisotropic materials were to be used (though typically soft iron is modeled as isotropic).
+? Cylinder: Used for circular magnets, wire cross-sections, and motor rotors. The create_cylinder method introduces the axis parameter ("X", "Y", or "Z"), which dictates the orientation.
+? Torus: As highlighted in snippet , the create_torus primitive is essential for toroidal transformers and specific "energy harvester" topologies (e.g., the Joule Thief or rod-core toroidal hybrids). Parameters include major_radius (distance from center to tube center) and minor_radius (tube radius).
+3.2 Boolean Logic: Air Gaps and Flux Modulation
+In the "Motionless Electromagnetic Generator" (MEG) concept, the modulation of flux is often achieved not by moving parts, but by modulating the reluctance of the circuit via saturation. However, physical air gaps are almost always present, even if filled with plastic or diamagnetic material.
+To create an air gap in PyAEDT, the Subtract operation is employed. A "Tool" object (representing the gap volume) is subtracted from a "Blank" object (the core). The keep_originals argument in m3d.modeler.subtract dictates whether the tool object remains. For an air gap, the tool is typically deleted, leaving a void. If the background region is defined as air/vacuum, this void becomes a high-reluctance barrier.
+3.3 Rotational Symmetry and Stator Duplication
+Modeling electric motors (Bedini or otherwise) requires rotational symmetry. Placing 12 stator poles manually is error-prone. The duplicate_around_axis method automates this. It accepts:
+1. assignment: The object to clone.
+2. axis: The axis of rotation.
+3. angle: The angle between clones (usually 360 / N_{poles}).
+4. clones: The total number of objects.
+This operation ensures perfect geometric symmetry, which is a prerequisite for accurate Cogging Torque calculations. A minor asymmetry in the mesh or geometry can introduce artificial torque ripples that obscure the true physics of the device.
+3.4 Region Creation vs. Balloon Boundaries
+A crucial distinction in the setup is how the infinite vacuum of space is modeled.
+? Create Region (create_region): This method generates a physical box (usually an air box) around the model with a specified padding percentage (e.g., +50% in all directions).
+? Assign Balloon (assign_balloon): This boundary condition is applied to the faces of the air region. It mathematically simulates the field extending to infinity.
+For transient magnetic simulations, creating an air region and assigning a Balloon boundary to its faces is the standard procedure to ensure the magnetic field lines can close naturally outside the core.
+4. Materials Physics: Constitutive Relations and Non-Linearity
+This section addresses the core of the user's research objective: Non-Linear Magnetics and Saturation. The accuracy of any simulation involving ferromagnetic cores is dictated by the fidelity of the material model, specifically the B-H curve (Magnetization Curve).
+4.1 Theory of Saturation and Hysteresis
+In linear magnetics, magnetic flux density \mathbf{B} is related to magnetic field strength \mathbf{H} by the permeability \mu: \mathbf{B} = \mu \mathbf{H}. In ferromagnetic materials, \mu is not constant. As \mathbf{H} increases, magnetic domains align. Once all domains are aligned, the material "saturates," and any further increase in \mathbf{B} requires a massive increase in \mathbf{H}, effectively behaving like air (\mu_r \approx 1).
+Devices like the MEG rely on operating at this knee point. A small control current pushes the material from high permeability (easy flux flow) to saturation (flux blocking), effectively switching the path of the permanent magnet's flux. Capturing this requires a Non-Linear B-H Curve.
+4.2 Implementing Non-Linearity in PyAEDT
+The materials module in PyAEDT allows for the creation and modification of material properties. The set_non_linear method is the specific API call utilized to assign a B-H curve to the permeability property of a material.
+The process involves:
+1. Material Creation: Using add_material to create a generic container (e.g., "SoftIron_Custom").
+2. Property Assignment: Setting scalar properties like conductivity. Conductivity is vital for the Eddy Current solver or Transient solver with Eddy Effects enabled. If conductivity is 0, the solver assumes the material is perfectly laminated or non-conductive, and no eddy current losses are calculated.
+3. B-H Curve Injection: The set_non_linear method accepts a list of points. These points are typically provided as two lists: a list of H values (A/m) and a list of B values (Tesla).
+Important Consideration: Curve Smoothing The snippet highlights a critical solver setting: "Smooth B-H Curve." If raw data points are used, the solver performs linear interpolation between them. This can cause convergence issues (Newton-Raphson divergence) if the curve has sharp discontinuities. PyAEDT allows enabling smoothing in the solver setup to create a differentiable curve, which aids in convergence during rapid transient switching.
+4.3 Temperature Dependence
+While the primary focus is B-H characteristics, snippets and indicate that Ansys supports temperature-dependent B-H curves. As a core heats up (due to hysteresis and eddy current losses), its saturation magnetization decreases. For high-power pulse motors, this thermal drift can detune the system. While the primary JSON pattern focuses on the base B-H curve, the architecture supports expanding this to include thermal modifiers if the AI agent provides temperature-indexed datasets.
+5. Electromagnetic Excitation and Winding Strategy
+Defining how energy enters the system is the next critical step. In PyAEDT and Maxwell 3D, the concept of a "Coil" and a "Winding" are distinct but linked entities.
+5.1 The Coil Terminal vs. The Winding
+A Coil Terminal is a geometric assignment. It is applied to a specific object (or face of an object) that represents the conductor. The assign_coil method maps the geometry to the electrical domain. Key parameters include:
+? conductors_number: The number of turns (N). For a solid bar, N=1. For a stranded coil modeled as a simple cylinder, N might be 500.
+? polarity: Defines the direction of current flow relative to the geometry's normal vector.
+A Winding is a logical group that contains one or more Coil Terminals. It defines the electrical source. The assign_winding method creates this container. Terminals are added to it via add_winding_coils.
+5.2 Excitation Types: Current vs. Voltage
+For Pulse Dynamics research, the choice of excitation type is profound :
+? Current Excitation: Forces a specific current I(t) through the coil regardless of the back EMF. This is ideal for testing static torque but terrible for researching back EMF harvesting, as it mathematically suppresses the inductive reaction effects on the source.
+? Voltage Excitation: Applies a potential difference V(t). The current I(t) is then a result of the simulation, governed by V = IR + L(di/dt) + V_{bemf}. This is the required mode for Bedini/MEG research, as it allows the observation of the current rise time (L/R time constant) and the interaction between the applied voltage and the induced voltage.
+? External Circuit: Snippet mentions importing an external circuit (from Maxwell Circuit Editor). This allows for complex drive topologies (e.g., H-bridges, capacitor dumps) to be coupled to the FEM model. The JSON pattern provides the hooks to create generic windings that can be linked to these external netlists.
+5.3 Stranded vs. Solid Conductors
+When creating the coil, one must decide if it is "Stranded" or "Solid."
+? Stranded: Assumes many thin wires insulated from each other. Eddy currents within the wire cross-section are ignored. This is computationally efficient and standard for wire-wound coils.
+? Solid: Assumes a single massive conductor. Eddy currents are calculated throughout the volume. This is used for busbars or squirrel cage rotors. For Bedini coils, "Stranded" is usually the correct physical model.
+6. Boundary Conditions and Field Containment
+Boundaries define the interface between the simulation domain and the rest of the universe, as well as the interfaces between objects within the domain.
+6.1 Insulating Boundaries and Laminations
+To reduce eddy currents, magnetic cores are laminated. Physically modeling thousands of 0.5mm steel sheets is computationally impossible due to mesh complexity. Instead, anisotropic conductivity or Insulating Boundaries are used. The assign_insulating method applies a high-resistance layer to faces. This prevents current from crossing the boundary. In a solid block representing a stack of laminations, applying insulating boundaries on the "cut" faces guides the eddy current solver to restrict current loops to the laminar plane, approximating the physics of the stack without the geometric overhead.
+6.2 Impedance Boundaries
+Snippet highlights assign_impedance. This boundary conditions uses surface impedance formulas to approximate skin depth effects in conductors that are not explicitly meshed inside. While less common for the core (where saturation is key), it is useful for shielding enclosures or conductive cases surrounding the device.
+6.3 Field Truncation: The Balloon Boundary
+As discussed in Section 3, the assign_balloon command is the standard way to terminate the domain. It essentially states that the potential at this boundary is zero at infinity. It is far superior to a simple "Zero Tangential H" boundary for open magnetic circuits because it allows flux lines to "balloon" out naturally, which is exactly what happens in the air gap of an open-frame motor.
+7. Transient Setup and Solver Configuration
+The Transient Solver is the engine of this research. It steps through time, solving the non-linear magnetic field equations at each interval.
+7.1 Time Stepping for Pulse Resolution
+The create_setup method establishes the temporal resolution.
+? TimeStep: Must be sufficiently small to resolve the rise time of the pulse. If a Bedini trigger pulse is 10 microseconds wide, a TimeStep of 1 microsecond is recommended.
+? StopTime: Defines the total duration.
+? SaveFields: Snippet notes the SaveFields option. Enabling this saves the full 3D field solution at every step. This allows for creating animations of flux saturation, which is invaluable for visual insight, but consumes massive amounts of disk space.
+7.2 Eddy Effects and Displacement Current
+Snippet introduces eddy_effects_on. This command is crucial. By default, a Transient solver might not calculate eddy currents in all objects to save time. Explicitly enabling eddy effects on the "SoftIron" core objects ensures that the damping effect of the core losses is included in the simulation. Additionally, the enable_displacement_current flag is relevant for high-frequency effects (dielectric currents), though for magnetic motors operating under 100kHz, this is typically disabled to improve convergence stability.
+7.3 Solver Convergence
+The NonlinearSolverResidual parameter in the setup defines how strictly the solver adheres to the B-H curve. A tighter residual (e.g., 0.001) yields more accurate saturation results but increases computation time per time step. The JSON pattern defaults to a balanced value (0.005) but exposes this for AI adjustment.
+8. Post-Processing and Data Architecture
+The simulation is useless without data extraction. The AI agent needs structured numerical feedback to optimize the design.
+8.1 Flux Linkage and Induced Voltage Calculation
+The physical quantity of greatest interest is Flux Linkage (\lambda). Snippet provides the theoretical basis:
+PyAEDT abstracts this integration. The post.get_solution_data method can query expressions like FluxLinkage(Winding1). The Induced Voltage is the time derivative: V_{ind} = -d\lambda/dt. PyAEDT calculates this automatically if requested via InducedVoltage(Winding1).
+8.2 Data Export Pipeline
+To integrate with the AI agent, the data must be serialized. The export_data_to_csv method writes the time-domain traces to a standard format. The JSON pattern includes a "Results" block that:
+1. Creates a rectangular plot/report in memory.
+2. Adds the requested traces (Voltage, Current, Flux, Torque).
+3. Extracts the data object.
+4. Writes to a CSV file path defined by the agent.
+This closes the loop: The Agent defines the JSON -> PyAEDT builds and runs -> PyAEDT exports CSV -> Agent reads CSV -> Agent learns and iterates.
+9. The JSON Pattern Library (ansys_patterns.json)
+Below is the definitive JSON structure derived from the research. It serves as the "Instruction Set Architecture" for the AI agent.
+{
+  "imports":,
+  "init_project":,
+  "geometry_shapes": {
+    "Box": [
+      "name = \"{obj_name}\"",
+      "material = \"{material}\"",
+      "origin = {origin_list}",
+      "sizes = {sizes_list}",
+      "m3d.modeler.create_box(origin=origin, sizes=sizes, name=name, material=material)"
+    ],
+    "Cylinder": [
+      "name = \"{obj_name}\"",
+      "material = \"{material}\"",
+      "origin = {origin_list}",
+      "radius = {radius}",
+      "height = {height}",
+      "axis = \"{axis}\"",
+      "m3d.modeler.create_cylinder(origin=origin, radius=radius, height=height, axis=axis, name=name, material=material)"
+    ],
+    "Torus": [
+      "name = \"{obj_name}\"",
+      "material = \"{material}\"",
+      "origin = {origin_list}",
+      "major_radius = {major_radius}",
+      "minor_radius = {minor_radius}",
+      "axis = \"{axis}\"",
+      "m3d.modeler.create_torus(origin=origin, major_radius=major_radius, minor_radius=minor_radius, axis=axis, name=name, material=material)"
+    ],
+    "Subtract": [
+      "blank_list = {blank_names}",
+      "tool_list = {tool_names}",
+      "m3d.modeler.subtract(tool_list=tool_list, blank_list=blank_list, keep_originals=False)"
+    ],
+    "Union": [
+      "object_list = {object_names}",
+      "m3d.modeler.unite(object_list)"
+    ],
+    "DuplicateAroundAxis": [
+      "assignment = {obj_list}",
+      "axis = \"{axis}\"",
+      "clones = {num_clones}",
+      "angle = {angle_degrees}",
+      "m3d.modeler.duplicate_around_axis(assignment=assignment, axis=axis, angle=angle, clones=clones)"
+    ],
+     "CreateRegion": [
+      "pad_percent = {pad_percent}",
+      "m3d.modeler.create_region(pad_value=pad_percent)"
+    ]
+  },
+  "materials": {
+    "CreateSoftIronBH": [
+      "mat_name = \"{material_name}\"",
+      "conductivity = {conductivity_val}",
+      "# Create new material or get existing",
+      "if mat_name not in m3d.materials.material_keys:",
+      "    new_mat = m3d.materials.add_material(mat_name)",
+      "else:",
+      "    new_mat = m3d.materials[mat_name]",
+      "new_mat.conductivity = conductivity",
+      "# Define B-H Curve points,...]",
+      "bh_points = {bh_curve_points}",
+      "b_list = [p for p in bh_points]",
+      "h_list = [p for p in bh_points]",
+      "# Apply Non-Linear Permeability",
+      "new_mat.permeability.set_non_linear(h_list, b_list)"
+    ]
+  },
+  "windings": {
+    "CreateCoilTerminal": [
+      "assignment = \"{object_name}\"",
+      "conductor_number = {turns}",
+      "name = \"{coil_name}\"",
+      "m3d.assign_coil(assignment=assignment, conductors_number=conductor_number, name=name)"
+    ],
+    "CreateWindingExcitation": [
+      "winding_name = \"{winding_name}\"",
+      "coil_terminals = {coil_terminal_names_list}",
+      "excitation_type = \"{excitation_type}\" # Voltage, Current, or External",
+      "current_val = \"{current_amp}\"",
+      "voltage_val = \"{voltage_volt}\"",
+      "resistance = \"{resistance}\"",
+      "inductance = \"{inductance}\"",
+      "winding = m3d.assign_winding(assignment=None, winding_type=excitation_type, name=winding_name)",
+      "m3d.add_winding_coils(assignment=winding_name, coils=coil_terminals)",
+      "if excitation_type == 'Current':",
+      "    winding.props['Current'] = current_val",
+      "elif excitation_type == 'Voltage':",
+      "    winding.props['Voltage'] = voltage_val",
+      "    winding.props = resistance",
+      "    winding.props['Inductance'] = inductance"
+    ]
+  },
+  "boundaries": {
+    "AssignInsulating": [
+      "assignment = {face_list}",
+      "boundary_name = \"{boundary_name}\"",
+      "m3d.assign_insulating(assignment=assignment, name=boundary_name)"
+    ],
+    "AssignBalloon": [
+      "assignment = {face_list}",
+      "boundary_name = \"{boundary_name}\"",
+      "m3d.assign_balloon(assignment=assignment, boundary=boundary_name)"
+    ]
+  },
+  "setup": {
+    "TransientSetup": = stop_time",
+      "setup.props = time_step",
+      "setup.props = 'Every step'",
+      "setup.update()"
+    ],
+    "EddyEffects": [
+      "objects_list = {object_names}",
+      "enable = {enable_bool}",
+      "m3d.eddy_effects_on(assignment=objects_list, enable_eddy_effects=enable, enable_displacement_current=False)"
+    ]
+  },
+  "analyze": {
+    "Run": [
+      "setup_name = \"{setup_name}\"",
+      "m3d.analyze_setup(setup_name)"
+    ]
+  },
+  "results": {
+    "ExportToCSV":
+  }
+}
+
+    "description": "Master Ansys Maxwell Pattern Library",
+    "version": "2.5",
+    "imports": [
+        "from pyaedt import Maxwell3d, Desktop",
+        "import os"
+    ],
+    "init_project": [
+        "# Launch Ansys Headless",
+        "d = Desktop(specified_version='2024.1', non_graphical=True, new_desktop_session=True, close_on_exit=True)",
+        "m3d = Maxwell3d(projectname='{project_name}', designname='{design_name}', solution_type='Transient', new_design=True)",
+        "m3d.modeler.model_units = 'mm'"
+    ],
+    "geometry_shapes": {
+        "box": [
+            "m3d.modeler.create_box(position=['{px}', '{py}', '{pz}'], dimensions_list=['{dx}', '{dy}', '{dz}'], name='{name}', matname='{material}')"
+        ],
+        "cylinder": [
+            "m3d.modeler.create_cylinder(cs_axis='{axis}', position=['{px}', '{py}', '{pz}'], radius='{radius}', height='{height}', name='{name}', matname='{material}')"
+        ],
+        "toroid": [
+            "m3d.modeler.create_torus(center=['{px}', '{py}', '{pz}'], major_radius='{major_r}', minor_radius='{minor_r}', axis='{axis}', name='{name}', matname='{material}')"
+        ],
+        "regular_polygon": [
+            "m3d.modeler.create_regular_polygon(position=['{px}', '{py}', '{pz}'], num_sides={sides}, inner_radius='{radius}', axis='{axis}', name='{name}', matname='{material}')"
+        ],
+        "subtract": [
+            "m3d.modeler.subtract(tool_list=['{tool}'], blank_list=['{blank}'], keep_originals=False)"
+        ],
+        "rotate": [
+            "m3d.modeler.rotate(assignment=['{obj}'], axis='{axis}', angle={angle})"
+        ]
+    },
+    "materials": {
+        "add_material": [
+            "mat = m3d.materials.add_material('{name}')",
+            "mat.permeability = {mu_r}",
+            "mat.conductivity = {sigma}"
+        ],
+        "nonlinear_bh_curve": [
+            "# Critical for Saturation Research",
+            "mat = m3d.materials.add_material('{name}')",
+            "mat.conductivity = {sigma}",
+            "b_points = {b_list}",
+            "h_points = {h_list}",
+            "mat.permeability.set_non_linear(h_points, b_points)"
+        ]
+    },
+    "windings": {
+        "create_winding": [
+            "m3d.assign_winding(assignment=None, winding_type='{type}', name='{name}', current_value='{current}', voltage_value='{voltage}')"
+        ],
+        "add_coil_to_winding": [
+            "m3d.assign_coil(assignment=['{obj}'], conductors_number={turns}, polarity='{polarity}', name='{coil_name}')",
+            "m3d.add_winding_coils(assignment='{winding_name}', coils=['{coil_name}'])"
+        ]
+    },
+    "setup": {
+        "transient": [
+            "setup = m3d.create_setup(setupname='TransientSetup')",
+            "setup.props['StopTime'] = '{stop_time}'",
+            "setup.props['TimeStep'] = '{time_step}'",
+            "setup.props['SaveFields'] = True",
+            "setup.update()"
+        ],
+        "eddy_effects": [
+            "m3d.eddy_effects_on(assignment=['{obj_list}'], enable_eddy_effects=True)"
+        ]
+    },
+    "analyze": {
+        "run": [
+            "m3d.analyze_setup('TransientSetup')"
+        ]
+    },
+    "results": {
+        "export_report": [
+            "report = m3d.post.create_report(expressions=['{expr}'], setup_name='TransientSetup', primary_sweep_variable='Time', report_category='Standard')",
+            "solution = report.get_solution_data()",
+            "solution.export_data_to_csv('{filepath}')"
+        ],
+        "flux_linkage": [
+            "# Built-in Flux Linkage extraction",
+            "m3d.post.create_report(expressions='FluxLinkage({winding_name})', setup_name='TransientSetup', primary_sweep_variable='Time', report_category='Standard')"
+        ],
+        "cleanup": [
+            "m3d.save_project()",
+            "m3d.release_desktop(close_projects=True, close_desktop=True)"
+        ]
+    }
+}
+10. Conclusion
+This report has detailed the architectural framework for automating Ansys Electronics Desktop via PyAEDT, specifically tailored for the demanding physics of non-linear magnetics and pulse dynamics. By dissecting the PyAEDT API, we have identified the critical methods required to build a "Translation Layer" that abstracts the complexity of the COM interface into a standardized JSON pattern.
+The distinction between geometric modeling (primitives) and physical assignment (materials, boundaries) has been codified into discrete, executable blocks. The careful handling of non-linear material properties—specifically the injection of B-H curve data—ensures that the resulting simulations can capture the saturation phenomena essential to Bedini and MEG research. Furthermore, the explicit management of transient solver settings and headless session control enables the robust, high-volume batch processing required for AI-driven design optimization. This library stands as a foundational tool for the next generation of autonomous engineering agents.
+Works cited
+1. Application and solvers — PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/Application.html 2. ansys/pyaedt: AEDT Python Client Package - GitHub, https://github.com/ansys/pyaedt 3. Desktop — PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.desktop.Desktop.html 4. Specifying BH Curves for Nonlinear Relative Permeability - Ansys Help website, https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v242/en/Subsystems/Maxwell/Content/SpecifyingBHCurvesforNonlinearRelativePermeability.htm 5. Nonlinear Materials - Ansys Help, https://ansyshelp.ansys.com/public//Views/Secured/Electronics/v252/en/Subsystems/Maxwell/Content/Maxwell/NonlinearMaterials.htm 6. Maxwell3d - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.html 7. Object3d — PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.modeler.cad.object_3d.Object3d.html 8. Modeler3D - PyAEDT Documentation - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.modeler.modeler_3d.Modeler3D.html 9. create_torus — PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.modeler.modeler_3d.Modeler3D.create_torus.html 10. duplicate_around_axis - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.modeler.modeler_2d.Modeler2D.duplicate_around_axis.html 11. assign_voltage - PyAEDT, https://aedt.docs.pyansys.com/version/dev/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.assign_voltage.html 12. assign_balloon - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell2d.assign_balloon.html 13. set_non_linear - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.modules.material.MatProperty.set_non_linear.html 14. Defining a Nonlinear BH Curve Using Ansys Maxwell - YouTube, https://www.youtube.com/watch?v=JExesBkKnkQ 15. assign_coil — PyAEDT, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.assign_coil.html 16. assign_winding - PyAnsys, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell2d.assign_winding.html 17. order_coil_terminals - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.order_coil_terminals.html 18. Getting Started with Maxwell: Transient Problem, https://www.oldfriend.url.tw/Tutorials/Ansoft/maxwell/Transient.pdf 19. AssignInsulating - Ansys Help website, https://ansyshelp.ansys.com/public//Views/Secured/Electronics/v251/en/Subsystems/Maxwell/Subsystems/Maxwell%20Scripting/Content/AssignInsulating.htm?TocPath=Boundary%20and%20Excitation%20Module%20Script%20Commands%20in%20Maxwell%7CScript%20Commands%20for%20Creating%20and%20Modifying%20Boundaries%20in%20Maxwell%7C_____7 20. assign_impedance - PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.assign_impedance.html 21. Maxwell templates and arguments — PyAEDT - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/SetupTemplatesMaxwell.html 22. Module 03: Transient Solvers, https://innovationspace.ansys.com/courses/wp-content/uploads/sites/5/2021/07/MAXW_GS_2020R2_EN_LE03.pdf 23. eddy_effects_on - PyAEDT, https://aedt.docs.pyansys.com/version/stable/API/_autosummary/ansys.aedt.core.maxwell.Maxwell3d.eddy_effects_on.html 24. Flux Linkage in Maxwell 3D (Transient) - Ansys Help website, https://ansyshelp.ansys.com/public/Views/Secured/Electronics/v242/en/Subsystems/Maxwell/Content/FluxLinkage3DTransient.htm?TocPath=Maxwell%20Help%7CMaxwell%203D%20Technical%20Notes%7C3D%20Transient%20Excitations%20(Sources)%7C_____4 25. get_solution_data - PyANSYS, https://aedt.docs.pyansys.com/version/stable/API/visualization/_autosummary/ansys.aedt.core.visualization.post.post_circuit.PostProcessorCircuit.get_solution_data.html 26. retrieving capacitance matrix after simulation with Maxwell3d ElectroStatic · ansys pyaedt · Discussion #5589 - GitHub, https://github.com/ansys/pyaedt/discussions/5589

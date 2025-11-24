@@ -1,0 +1,90 @@
+{
+    "description": "Master Ansys Maxwell Pattern Library",
+    "version": "2.5",
+    "imports": [
+        "from pyaedt import Maxwell3d, Desktop",
+        "import os"
+    ],
+    "init_project": [
+        "# Launch Ansys Headless",
+        "d = Desktop(specified_version='2024.1', non_graphical=True, new_desktop_session=True, close_on_exit=True)",
+        "m3d = Maxwell3d(projectname='{project_name}', designname='{design_name}', solution_type='Transient', new_design=True)",
+        "m3d.modeler.model_units = 'mm'"
+    ],
+    "geometry_shapes": {
+        "box": [
+            "m3d.modeler.create_box(position=['{px}', '{py}', '{pz}'], dimensions_list=['{dx}', '{dy}', '{dz}'], name='{name}', matname='{material}')"
+        ],
+        "cylinder": [
+            "m3d.modeler.create_cylinder(cs_axis='{axis}', position=['{px}', '{py}', '{pz}'], radius='{radius}', height='{height}', name='{name}', matname='{material}')"
+        ],
+        "toroid": [
+            "m3d.modeler.create_torus(center=['{px}', '{py}', '{pz}'], major_radius='{major_r}', minor_radius='{minor_r}', axis='{axis}', name='{name}', matname='{material}')"
+        ],
+        "regular_polygon": [
+            "m3d.modeler.create_regular_polygon(position=['{px}', '{py}', '{pz}'], num_sides={sides}, inner_radius='{radius}', axis='{axis}', name='{name}', matname='{material}')"
+        ],
+        "subtract": [
+            "m3d.modeler.subtract(tool_list=['{tool}'], blank_list=['{blank}'], keep_originals=False)"
+        ],
+        "rotate": [
+            "m3d.modeler.rotate(assignment=['{obj}'], axis='{axis}', angle={angle})"
+        ]
+    },
+    "materials": {
+        "add_material": [
+            "mat = m3d.materials.add_material('{name}')",
+            "mat.permeability = {mu_r}",
+            "mat.conductivity = {sigma}"
+        ],
+        "nonlinear_bh_curve": [
+            "# Critical for Saturation Research",
+            "mat = m3d.materials.add_material('{name}')",
+            "mat.conductivity = {sigma}",
+            "b_points = {b_list}",
+            "h_points = {h_list}",
+            "mat.permeability.set_non_linear(h_points, b_points)"
+        ]
+    },
+    "windings": {
+        "create_winding": [
+            "m3d.assign_winding(assignment=None, winding_type='{type}', name='{name}', current_value='{current}', voltage_value='{voltage}')"
+        ],
+        "add_coil_to_winding": [
+            "m3d.assign_coil(assignment=['{obj}'], conductors_number={turns}, polarity='{polarity}', name='{coil_name}')",
+            "m3d.add_winding_coils(assignment='{winding_name}', coils=['{coil_name}'])"
+        ]
+    },
+    "setup": {
+        "transient": [
+            "setup = m3d.create_setup(setupname='TransientSetup')",
+            "setup.props['StopTime'] = '{stop_time}'",
+            "setup.props['TimeStep'] = '{time_step}'",
+            "setup.props['SaveFields'] = True",
+            "setup.update()"
+        ],
+        "eddy_effects": [
+            "m3d.eddy_effects_on(assignment=['{obj_list}'], enable_eddy_effects=True)"
+        ]
+    },
+    "analyze": {
+        "run": [
+            "m3d.analyze_setup('TransientSetup')"
+        ]
+    },
+    "results": {
+        "export_report": [
+            "report = m3d.post.create_report(expressions=['{expr}'], setup_name='TransientSetup', primary_sweep_variable='Time', report_category='Standard')",
+            "solution = report.get_solution_data()",
+            "solution.export_data_to_csv('{filepath}')"
+        ],
+        "flux_linkage": [
+            "# Built-in Flux Linkage extraction",
+            "m3d.post.create_report(expressions='FluxLinkage({winding_name})', setup_name='TransientSetup', primary_sweep_variable='Time', report_category='Standard')"
+        ],
+        "cleanup": [
+            "m3d.save_project()",
+            "m3d.release_desktop(close_projects=True, close_desktop=True)"
+        ]
+    }
+}

@@ -1,0 +1,154 @@
+{
+    "description": "Master COMSOL Pattern Library for Scalar Electrodynamics",
+    "version": "3.0",
+    "imports": [
+        "import mph",
+        "import numpy as np",
+        "client = mph.start()",
+        "model = client.create('{model_name}')"
+    ],
+    "geometry_shapes": {
+        "block": [
+            "geom = model.geometries.create('geom1')",
+            "blk = geom.create('blk{id}', 'Block')",
+            "blk.property('size', ['{size_x}', '{size_y}', '{size_z}'])",
+            "blk.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "cylinder": [
+            "geom = model.geometries.create('geom1')",
+            "cyl = geom.create('cyl{id}', 'Cylinder')",
+            "cyl.property('r', '{radius}')",
+            "cyl.property('h', '{height}')",
+            "cyl.property('pos', ['{px}', '{py}', '{pz}'])",
+            "cyl.property('axis', ['{ax}', '{ay}', '{az}'])",
+            "model.build(geom)"
+        ],
+        "sphere": [
+            "geom = model.geometries.create('geom1')",
+            "sph = geom.create('sph{id}', 'Sphere')",
+            "sph.property('r', '{radius}')",
+            "sph.property('pos', ['{px}', '{py}', '{pz}'])",
+            "model.build(geom)"
+        ],
+        "toroid": [
+            "geom = model.geometries.create('geom1')",
+            "tor = geom.create('tor{id}', 'Torus')",
+            "tor.property('rmaj', '{major_radius}')",
+            "tor.property('rmin', '{minor_radius}')",
+            "tor.property('pos', ['{px}', '{py}', '{pz}'])",
+            "tor.property('axis', ['{ax}', '{ay}', '{az}'])",
+            "model.build(geom)"
+        ],
+        "helix_coil": [
+            "geom = model.geometries.create('geom1')",
+            "hel = geom.create('hel{id}', 'Helix')",
+            "hel.property('r', '{radius}')",
+            "hel.property('h', '{height}')",
+            "hel.property('n', '{turns}')",
+            "hel.property('rwire', '{wire_radius}')",
+            "model.build(geom)"
+        ],
+        "boolean_union": [
+            "uni = geom.create('uni{id}', 'Union')",
+            "uni.selection('input').set({objects_list})",
+            "model.build(geom)"
+        ],
+        "boolean_difference": [
+            "dif = geom.create('dif{id}', 'Difference')",
+            "dif.selection('input').set({keep_list})",
+            "dif.selection('input2').set({subtract_list})",
+            "model.build(geom)"
+        ]
+    },
+    "physics_modules": {
+        "magnetic_fields_mf": [
+            "phys = model.physics.create('mf', 'MagneticFields', 'geom1')",
+            "amp = phys.feature.create('al1', 'AmpereLaw', 'domain')",
+            "amp.selection().all()",
+            "ins = phys.feature.create('ins1', 'MagneticInsulation', 'boundary')",
+            "ins.selection().all()"
+        ],
+        "electric_currents_ec": [
+            "phys = model.physics.create('ec', 'ElectricCurrents', 'geom1')",
+            "cuc = phys.feature.create('cuc1', 'CurrentConservation', 'domain')",
+            "cuc.selection().all()",
+            "gnd = phys.feature.create('gnd1', 'Ground', 'boundary')"
+        ],
+        "scalar_wave_pde": [
+            "# Bearden's Scalar Field Formulation (General Form PDE)",
+            "phys = model.physics.create('g', 'GeneralFormPDE', 'geom1', ['phi'])",
+            "gde = phys.feature.create('gde1', 'GeneralFormPDE', 'domain')",
+            "gde.property('source', '{source_term}')",
+            "gde.property('da', '{damping_term}')",
+            "gde.selection().all()"
+        ]
+    },
+    "components": {
+        "multi_turn_coil": [
+            "coil = phys.create('coil{id}', 'Coil', 2)",
+            "coil.property('ConductorModel', 'HomogenizedMultiTurn')",
+            "coil.property('N', '{turns}')",
+            "coil.property('ICoil', '{current}')",
+            "coil.property('CoilType', 'Circular')",
+            "coil.selection().set({domain_ids})"
+        ],
+        "voltage_terminal": [
+            "term = phys.create('term{id}', 'Terminal', 2)",
+            "term.property('TerminalType', 'Voltage')",
+            "term.property('V0', '{voltage}')",
+            "term.selection().set({boundary_ids})"
+        ]
+    },
+    "materials": {
+        "air": [
+            "mat = model.materials.create('mat_air')",
+            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '0'})",
+            "mat.selection().all()"
+        ],
+        "copper": [
+            "mat = model.materials.create('mat_cu')",
+            "mat.property('def', {'epsilonr': '1', 'mur': '1', 'sigma': '5.998e7[S/m]'})",
+            "mat.selection().set({domain_ids})"
+        ],
+        "custom_core": [
+            "mat = model.materials.create('mat_custom')",
+            "mat.property('def', {'epsilonr': '{epsilon}', 'mur': '{mu}', 'sigma': '{sigma}'})",
+            "mat.selection().set({domain_ids})"
+        ]
+    },
+    "studies": {
+        "stationary": [
+            "std = model.studies.create('std1')",
+            "std.feature.create('stat', 'Stationary')",
+            "model.solve('std1')"
+        ],
+        "frequency_domain": [
+            "std = model.studies.create('std1')",
+            "freq = std.feature.create('freq', 'Frequency')",
+            "freq.property('plist', '{freq_range}')",
+            "model.solve('std1')"
+        ],
+        "time_dependent": [
+            "std = model.studies.create('std1')",
+            "time = std.feature.create('time', 'Time')",
+            "time.property('tlist', 'range(0,{step},{end})')",
+            "model.solve('std1')"
+        ]
+    },
+    "results_extraction": {
+        "global_eval": [
+            "eval = model.results.numerical.create('gev{id}', 'EvalGlobal')",
+            "eval.property('expr', {expressions_list})",
+            "eval.property('unit', {units_list})",
+            "res = eval.compute()",
+            "print(f'GLOBAL_RESULT: {res}')"
+        ],
+        "export_csv": [
+            "exp = model.results.export.create('data{id}', 'Data')",
+            "exp.property('expr', {expressions_list})",
+            "exp.property('filename', '{filepath}')",
+            "exp.run()"
+        ]
+    }
+}
